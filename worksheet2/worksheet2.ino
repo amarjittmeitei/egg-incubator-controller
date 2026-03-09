@@ -4,7 +4,7 @@
 #include <ArduinoJson.h>
 
 LiquidCrystal_I2C lcd(0x27,16,2);
-const uint8_t chipSelect = 10;
+const uint8_t chipSelect = 5;
 SdExFat sd;
 
 struct Settings {
@@ -36,7 +36,7 @@ bool saveJson(const char* path, const Settings& data) {
     return 0;
   }
 
-  StaticJsonDocument<JSON_OBJECT_SIZE(12) + 200> doc;
+  StaticJsonDocument<256> doc;
  // doc["magic"] = data.magic;
   doc["p"]     = data.p;
   doc["i"]     = data.i;
@@ -69,7 +69,7 @@ bool loadJson(const char* path, Settings& data) {
     return false;
   }
 
-  StaticJsonDocument<JSON_OBJECT_SIZE(12) + 200> doc;
+  StaticJsonDocument<256> doc;
   DeserializationError error = deserializeJson(doc, file);
   file.close();
 
@@ -135,16 +135,16 @@ void printConfig(Settings s) {
 //   return crtime;
 // }
 
-bool setIncStatus(Settings s)
+bool setIncStatus()
 {
-  s.proc = 1;
-  s.hr = 14;
-  s.min = 53;
-  s.sec = 25;
-  s.dd = 1;
-  s.mm = 1;
-  s.yy = 1;
-  if(saveJson(CONFIG_FILE,s))
+  myConfig.proc = 1;
+  myConfig.hr = 14;
+  myConfig.min = 53;
+  myConfig.sec = 25;
+  myConfig.dd = 1;
+  myConfig.mm = 1;
+  myConfig.yy = 1;
+  if(saveJson(CONFIG_FILE,myConfig))
     return 1;
   else
     return 0;
@@ -175,27 +175,28 @@ void setup() {
   // Initialize your struct
   myConfig = {1.5, 0.3, 0.05, 22.5, 45,0,13,45,53,13,4,2016};
   saveJson(CONFIG_FILE, myConfig);
-  Settings loadedConfig;
-  loadJson(CONFIG_FILE, loadedConfig);
-  if(setIncStatus(loadedConfig))
+  //Settings loadedConfig;
+  //loadJson(CONFIG_FILE, loadedConfig);
+  if(setIncStatus())
     Serial.println("inc set successful");
   else
     Serial.println("inc set failed");
   //saveJson(CONFIG_FILE, myConfig);
+  printConfig(myConfig);
   
-  if (loadJson(CONFIG_FILE, loadedConfig)) {
-    printConfig(loadedConfig);
-  // --- Test 1: Create ---
-  // saveJson(CONFIG_FILE, myConfig);
+  // if (loadJson(CONFIG_FILE, loadedConfig)) {
+  //   printConfig(loadedConfig);
+  // // --- Test 1: Create ---
+  // // saveJson(CONFIG_FILE, myConfig);
 
-  // --- Test 2: Modify & Override ---
-  // myConfig.sTemp = 25.0; // Change a value
-  // myConfig.proc = false;
-  // saveJson(CONFIG_FILE, myConfig);
+  // // --- Test 2: Modify & Override ---
+  // // myConfig.sTemp = 25.0; // Change a value
+  // // myConfig.proc = false;
+  // // saveJson(CONFIG_FILE, myConfig);
 
-  // --- Test 3: Read ---
+  // // --- Test 3: Read ---
   
-  }
+  // }
 
   // --- Test 4: List all files ---
   

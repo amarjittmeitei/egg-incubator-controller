@@ -10,7 +10,7 @@
 LiquidCrystal_I2C lcd(0x27,16,2);
 
 // CS pin for Arduino Uno is typically 10
-const uint8_t chipSelect = 10;
+const uint8_t chipSelect = 5;
 const char* CONFIG_FILE = "settings.json";
 
 // Use SdExFat for dedicated exFAT support to save memory on Uno
@@ -19,9 +19,9 @@ SdExFat sd;
 
 unsigned long displayTime = 0;
 
-uint8_t but1 = 6; //use to know the button is press - menu driven
-uint8_t but2 = 7; //use to know the button is press - menu driven
-uint8_t pulse = 0; //pwm for heater
+uint8_t but1 = 4; //use to know the button is press - menu driven
+uint8_t but2 = 16; //use to know the button is press - menu driven
+uint8_t pulse = 17; //pwm for heater
 
 byte but1Flag = 0;
 byte but2Flag = 0;
@@ -179,6 +179,11 @@ void deleteSettings(const char* path) {
   }
 }
 
+bool startInc()
+{
+  
+}
+
 void lcdPrint(String a, String b)
 {
   lcd.clear();
@@ -195,7 +200,7 @@ void setup() {
   lcd.backlight();
   lcd.clear();
 
-  Serial.begin(9600);
+  Serial.begin(115200);
   pinMode(but1, INPUT_PULLUP);
   pinMode(but2, INPUT_PULLUP);
 
@@ -203,7 +208,7 @@ void setup() {
 
   lcdPrint("YAWOLART", "Egg Incubator");
   // Initialize the SD card
-  if (!sd.begin(chipSelect, SD_SCK_MHZ(16))) {
+  if (!sd.begin(chipSelect, SD_SCK_MHZ(4))) {
     Serial.println("Initialization failed! Check your wiring and CS pin.");
     lcdPrint("YAWOLART","SD card-----Fail");
     delay(1000);
