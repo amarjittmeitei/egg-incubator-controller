@@ -2,134 +2,90 @@
 #include <SPI.h>
 #include <SdFat.h>
 #include <ArduinoJson.h>
-//#include <EEPROM.h>
 
-#define EEPROM_ADDR 0
-#define MAGIC_NUMBER 0x55AA
-
-LiquidCrystal_I2C lcd(0x27,16,2);
-
-// CS pin for Arduino Uno is typically 10
-const uint8_t chipSelect = 5;
-const char* CONFIG_FILE = "settings.json";
-
-// Use SdExFat for dedicated exFAT support to save memory on Uno
-SdExFat sd;
-
-
-unsigned long displayTime = 0;
-
-uint8_t but1 = 4; //use to know the button is press - menu driven
-uint8_t but2 = 16; //use to know the button is press - menu driven
-uint8_t pulse = 17; //pwm for heater
-
-byte but1Flag = 0;
-byte but2Flag = 0;
 
 struct Settings {
-  uint16_t magic;   // validation marker
   float p;
   float i;
   float d;
   float sTemp;
   uint8_t sHum;
-  bool proc;
-  bool am;
+  uint8_t proc;
+  char logFile[20];
+  bool setup;
+  bool motorCal;
+  bool humSys;
+  bool temSys;
   uint8_t hr;
   uint8_t min;
-  uint8_t sec;
+  //uint8_t sec;
+  uint8_t dd;
+  uint8_t mm;
+  unsigned int yy;
+  uint8_t sdd;
+  uint8_t smm;
+  unsigned int syy;
 };
 
-Settings config;
+Settings myConfig;
 
-float readHum();
-uint8_t readTemp();
+LiquidCrystal_I2C lcd(0x27,16,2);
+const uint8_t chipSelect = 5;
+SdExFat sd;
 
+const char* CONFIG_FILE = "settings.json";
+const char* LOG_DIR = "/logs";
 
-// uint8_t writeConfigIfEmpty() {
-//   Settings temp;
-//   EEPROM.get(EEPROM_ADDR, temp);
+unsigned long lastTime = 0;
 
-//   if (temp.magic != MAGIC_NUMBER) {
-//     Serial.println("First time setup. Writing defaults...");
-//     config.magic = MAGIC_NUMBER;
-//     config.p = 2.0;
-//     config.i = 0.5;
-//     config.d = 1.0;
-//     config.sTemp = 35;
-//     config.sHum = 65;
-//     config.proc = false;
-//     config.am = false;
-//     config.hr = 12;
-//     config.min = 0;
-//     config.sec = 0;
+uint8_t mpointer = 0;
+uint8_t spointer = 0;
+uint8_t mspointer = 0;
 
-//     EEPROM.put(EEPROM_ADDR, config);
-//     return 0;
-//   }
-//   else {
-//     Serial.println("Config already exists.");
+float temSetV1 = 30;
+float humSetV1 = 50;
+float temSetV2 = 27;
+float humSetV2 = 40;
 
-//     return 1;
-//   }
-// }
+float getTem();
+float getHum();
+bool waterLevel();
 
 
-// Settings readConfig() {
-//   Settings temp;
-//   EEPROM.get(EEPROM_ADDR, temp);
-
-//   if (temp.magic == MAGIC_NUMBER) {
-//     return temp;
-//   } else {
-//     Serial.println("Invalid config!");
-//     return temp;   // caller must verify
-//   }
-// }
-
-
-// void updateConfig(Settings newConfig) {
-//   newConfig.magic = MAGIC_NUMBER;
-//   EEPROM.put(EEPROM_ADDR, newConfig);
-//   Serial.println("Config updated.");
-// }
-
-//for debug only
-void printConfig(Settings s) {
-  Serial.print("P: "); Serial.println(s.p);
-  Serial.print("I: "); Serial.println(s.i);
-  Serial.print("D: "); Serial.println(s.d);
-  Serial.print("sTemp: "); Serial.println(s.sTemp);
-  Serial.print("sHum: "); Serial.println(s.sHum);
-  Serial.print("proc: "); Serial.println(s.proc);
-  Serial.print("am: "); Serial.println(s.am);
-  Serial.print("Time: ");
-  Serial.print(s.hr); Serial.print(":");
-  Serial.print(s.min); Serial.print(":");
-  Serial.println(s.sec);
-}
-
-// // 1. CREATE or OVERRIDE (Modify)
-void saveSettings(const char* path, const Settings& data) {
+// 1. CREATE or OVERRIDE (Modify)
+bool saveJson(const char* path, const Settings& data) {
   ExFile file;
   // O_TRUNC wipes the file if it exists, allowing a clean override
   if (!file.open(path, O_WRONLY | O_CREAT | O_TRUNC)) {
     Serial.println(F("Error: Could not open for writing"));
-    return;
+    return 0;
   }
 
   StaticJsonDocument<256> doc;
-  doc["magic"] = data.magic;
+ // doc["magic"] = data.magic;
+  doc["id1"] = 0x4A;
   doc["p"]     = data.p;
   doc["i"]     = data.i;
   doc["d"]     = data.d;
   doc["sTemp"] = data.sTemp;
   doc["sHum"]  = data.sHum;
   doc["proc"]  = data.proc;
-  doc["am"]    = data.am;
+  doc["logFile"] = data.logFile;
+  //doc["am"]    = data.am;
+  doc["setup"] = data.setup;
+  doc["motorCal"] = data.motorCal;
+  doc["humSys"] = data.humSys;
+  doc["temSys"] = data.temSys;
   doc["hr"]    = data.hr;
   doc["min"]   = data.min;
-  doc["sec"]   = data.sec;
+  //doc["sec"]   = data.sec;
+  doc["dd"] = data.dd;
+  doc["mm"] = data.mm;
+  doc["yy"] = data.yy;
+  doc["sdd"] = data.sdd;
+  doc["smm"] = data.smm;
+  doc["syy"] = data.syy;
+  doc["id2"] = 0xA4;
 
   if (serializeJson(doc, file) == 0) {
     Serial.println(F("Error: JSON write failed"));
@@ -137,10 +93,11 @@ void saveSettings(const char* path, const Settings& data) {
     Serial.println(F("Settings saved/overridden."));
   }
   file.close();
+  return 1;
 }
 
 // 2. READ JSON into Struct
-bool loadSettings(const char* path, Settings& data) {
+bool loadJson(const char* path, Settings& data) {
   ExFile file;
   if (!file.open(path, O_RDONLY)) {
     Serial.println(F("Error: File not found"));
@@ -152,36 +109,115 @@ bool loadSettings(const char* path, Settings& data) {
   file.close();
 
   if (error) {
-    Serial.println(F("Error: JSON Parse failed"));
+    Serial.println(error.c_str());
     return false;
   }
 
   // Map values back to struct
-  data.magic = doc["magic"];
-  data.p     = doc["p"];
-  data.i     = doc["i"];
-  data.d     = doc["d"];
-  data.sTemp = doc["sTemp"];
-  data.sHum  = doc["sHum"];
-  data.proc  = doc["proc"];
-  data.am    = doc["am"];
-  data.hr    = doc["hr"];
-  data.min   = doc["min"];
-  data.sec   = doc["sec"];
-
+  //data.magic = doc["magic"];
+  if(doc["id1"] == 0x4A && doc["id2"] == 0xA4)
+  {
+    data.p = doc["p"];
+    data.i = doc["i"];
+    data.d = doc["d"];
+    data.sTemp = doc["sTemp"];
+    data.sHum = doc["sHum"];
+    data.proc = doc["proc"];
+    strncpy(data.logFile,doc["logFile"],sizeof(doc["logFile"]));
+    //data.logFile = doc["logFile"];
+    // data.am    = doc["am"];
+    data.setup = doc["setup"];
+    data.motorCal = doc["motorCal"];
+    data.humSys = doc["humSys"];
+    data.temSys = doc["temSys"];
+    data.hr  = doc["hr"];
+    data.min = doc["min"];
+    //data.sec = doc["sec"];
+    data.dd = doc["dd"];
+    data.mm = doc["mm"];
+    data.yy = doc["yy"];
+    data.sdd = doc["sdd"];
+    data.smm = doc["smm"];
+    data.syy = doc["syy"];
+  }
+  else
+  {
+    lcdPrint("Data corrupted!!","Restart device");
+    while(true){} //for now fix the sd card manully restart the system
+    // in future write auto fix algorithm here to override the corrupted data...
+  }
+  
   return true;
 }
 
 // 3. DELETE File
-void deleteSettings(const char* path) {
+void deleteFile(const char* path) {
   if (sd.exists(path)) {
     if (sd.remove(path)) Serial.println(F("Settings file deleted."));
   }
 }
 
-bool startInc()
+bool checkFile(const char* filename) {
+  if (sd.exists(filename)) {
+    return true;
+  }
+  return false;
+}
+
+void printConfig(Settings s) {
+  Serial.print("P: "); Serial.println(s.p);
+  Serial.print("I: "); Serial.println(s.i);
+  Serial.print("D: "); Serial.println(s.d);
+  Serial.print("sTemp: "); Serial.println(s.sTemp);
+  Serial.print("sHum: "); Serial.println(s.sHum);
+  Serial.print("proc: "); Serial.println(s.proc);
+  Serial.print("logFile: "); Serial.println(s.logFile);
+  // Serial.print("am: "); Serial.println(s.am);
+  Serial.print("setup: "); Serial.println(s.setup);
+  Serial.print("motorCal: "); Serial.println(s.motorCal);
+  Serial.print("humSys: "); Serial.println(s.humSys);
+  Serial.print("temSys: "); Serial.println(s.temSys);
+  Serial.print("Time: ");
+  Serial.print(s.hr); Serial.print(":");
+  Serial.println(s.min);
+  Serial.print("Date: ");
+  Serial.print(s.dd); Serial.print("-");
+  Serial.print(s.mm); Serial.print("-");
+  Serial.println(s.yy);
+  Serial.print("SD card Date: ");
+  Serial.print(s.sdd); Serial.print("-");
+  Serial.print(s.smm); Serial.print("-");
+  Serial.println(s.syy);
+}
+
+// Time gettime()
+// {
+//   Time crtime;
+//   crtime.proc = 0;
+//   crtime.hr = 15;
+//   crtime.min = 56;
+//   crtime.sec = 34;
+//   crtime.dd = 04;
+//   crtime.mm = 03;
+//   crtime.yy = 26;
+//   return crtime;
+// }
+
+bool setIncStatus(bool mode)
 {
-  
+  myConfig.proc = !mode?1:2;
+  myConfig.sTemp = !mode?temSetV1:temSetV2;
+  myConfig.sHum = !mode?humSetV1:humSetV2;
+  myConfig.hr = 14;
+  myConfig.min = 53;
+ // myConfig.sec = 25;
+  myConfig.dd = 1;
+  myConfig.mm = 6;
+  myConfig.yy = 2023;
+  if(saveJson(CONFIG_FILE,myConfig))
+    return 1;
+  else
+    return 0;
 }
 
 void lcdPrint(String a, String b)
@@ -193,121 +229,128 @@ void lcdPrint(String a, String b)
   lcd.print(b);
 }
 
-
 void setup() {
-  // put your setup code here, to run once:
+  Serial.begin(115200);
   lcd.init();
   lcd.backlight();
   lcd.clear();
-
-  Serial.begin(115200);
-  pinMode(but1, INPUT_PULLUP);
-  pinMode(but2, INPUT_PULLUP);
-
-  //while (!Serial) {} // Wait for serial port to connect
-
-  lcdPrint("YAWOLART", "Egg Incubator");
-  // Initialize the SD card
-  if (!sd.begin(chipSelect, SD_SCK_MHZ(4))) {
-    Serial.println("Initialization failed! Check your wiring and CS pin.");
-    lcdPrint("YAWOLART","SD card-----Fail");
-    delay(1000);
+  lcdPrint("YAWOLART","Eggs Incubator");
+  if (!sd.begin(chipSelect, SD_SCK_MHZ(16)))
+  {
+    Serial.println("Sd card cannot be read");
+    lcdPrint("YAWOLART","SD Card-----Fail");
+     //return;
   }
   else
   {
     lcdPrint("YAWOLART","SD Card-------OK");
-    // Serial.println("Listing files and directories:");
-    // Serial.println("------------------------------");
-
-  // ls() parameters:
-  // &Serial: Output stream
-  // LS_R: Recursive (shows subdirectories)
-  // LS_SIZE: Shows file sizes in bytes
-    Settings myConfig = {0xBEEF, 1.5, 0.2, 0.05, 22.5, 45, true, false, 12, 30, 0};
-    saveSettings(CONFIG_FILE, myConfig);
-    sd.ls(&Serial, LS_R | LS_SIZE);
-    Serial.println("------------------------------");
-    Serial.println("Done.");
-    //saveSettings("settings.json",config);
-    Settings temps;
-    loadSettings(CONFIG_FILE,temps);
-    printConfig(temps);
+    //deleteFile(CONFIG_FILE);
     delay(1000);
+    if(sd.exists(CONFIG_FILE))
+    {
+      lcdPrint("YAWOLART","Data-----Fetched");
+      loadJson(CONFIG_FILE,myConfig);
+    }
+    else
+    {
+      Serial.println("f----settings file created");
+      lcdPrint("YAWOLART","Data-----Written");
+      sd.ls(&Serial, LS_SIZE);
+      // Initialize your struct
+      myConfig = {1.5,0.3,0.05,37,60,0,"",1,0,0,0,15,58,11,3,2025,11,6,2024};
+      saveJson(CONFIG_FILE, myConfig);
+
+      // if(setIncStatus(0))
+      //   Serial.println("inc set successful");
+      // else
+      //   Serial.println("inc set failed");
+    }
+
+    if(!sd.exists(LOG_DIR))
+    {
+      sd.mkdir(LOG_DIR);
+      Serial.println("f----log directory created");
+    }
   }
-
-
-  // if(writeConfigIfEmpty())
-  //   lcdPrint("YAWOLART","EEPROM-----Found");
-  // else
-  //   lcdPrint("YAWOLART","EEPROM--NotFound");
-  // delay(1000);
-
-  // config = readConfig();  // read existing config
-  // printConfig(config);
-
-  // // Example modification
-  // config.p = 3.3;
-  // config.proc = 0;
-  // config.am = true;
-  // config.hr = 0;
-  // config.min = 0;
-  // updateConfig(config);
-
-  // Serial.println("After modification:");
-  // config = readConfig();
-  // printConfig(config);
-
+  delay(1000);
+  //deleteFile("settings.json");
+  // sd.ls(&Serial, LS_SIZE);
+  // // Initialize your struct
+  // myConfig = {1.5, 0.3, 0.05, 22.5, 45,0,0,0,0,0,13,45,53,13,4,2016};
+  // saveJson(CONFIG_FILE, myConfig);
   
-  lcdPrint("YAWOLART","Press to start");
-  while(digitalRead(but1) && digitalRead(but2)){} //waiting for any button to press
- 
+  // if(setIncStatus())
+  //   Serial.println("inc set successful");
+  // else
+  //   Serial.println("inc set failed");
+  //saveJson(CONFIG_FILE, myConfig);
+  // Settings loadedConfig;
+  // loadJson(CONFIG_FILE, loadedConfig);
+  printConfig(myConfig);
+  
+  
+  // if (loadJson(CONFIG_FILE, loadedConfig)) {
+  //   printConfig(loadedConfig);
+  // // --- Test 1: Create ---
+  // // saveJson(CONFIG_FILE, myConfig);
+
+  // // --- Test 2: Modify & Override ---
+  // // myConfig.sTemp = 25.0; // Change a value
+  // // myConfig.proc = false;
+  // // saveJson(CONFIG_FILE, myConfig);
+
+  // // --- Test 3: Read ---
+  
+  // }
+
+  // --- Test 4: List all files ---
+  
+
+
+
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
 
-  unsigned long currentTime = millis();
+  unsigned long currentTime = millis()/1000;
 
-  if(config.proc)
+  if(myConfig.proc == 0)
   {
-
-  }
-  else if(!config.proc)
-  {
-    if(!digitalRead(but1))
+    if(currentTime-lastTime >= 1)
     {
-      but1Flag = (but1Flag+1) % 2;
-      while(!digitalRead(but1)){}
+      char line1[16];
+      char line2[16] = "DATE";
+      if(myConfig.setup == 0)
+      {
+        snprintf(line1,16,"YAWOLART Setup");
+      }
+      else
+      {
+        snprintf(line1,16,"TIME %c%c%c%c",myConfig.motorCal?' ':'M',myConfig.humSys?' ':'H',myConfig.temSys?' ':'T','S');
+      }
+      lcdPrint(line1,line2);
     }
-
-    if(digitalRead(but2))
-    {
-      but2Flag = (but2Flag+1) % 2;
-      while(!digitalRead(but2)){}
-    }
-
-
-    if (currentTime/1000 - displayTime >= 1) 
-    {
-
-      lcdPrint("Yawolart","display check");
-
-      displayTime = currentTime/1000;
-    }
+    lastTime = currentTime;
   }
   
-
+ 
+  
 }
 
-float readHum()
+float getTem()
 {
-  //sensor reading
+  //hardware for this fuction is not installed yet
   return 0.0;
 }
 
-uint8_t readTemp()
+float getHum()
 {
-  //sensor reading
+  //hardware for this fuction is not installed yet
   return 0.0;
 }
 
+bool waterLevel()
+{
+  //hardware for this fuction is not installed yet
+  return true;
+}
