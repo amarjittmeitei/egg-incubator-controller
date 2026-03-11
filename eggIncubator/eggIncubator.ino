@@ -2,7 +2,8 @@
 #include <SPI.h>
 #include <SdFat.h>
 #include <ArduinoJson.h>
-
+#include <Wire.h>
+#include <RTClib.h>
 
 struct Settings {
   float p;
@@ -29,9 +30,13 @@ struct Settings {
 
 Settings myConfig;
 
+RTC_DS1307 rtc;
+DateTime now;
 LiquidCrystal_I2C lcd(0x27,16,2);
 const uint8_t chipSelect = 5;
 SdExFat sd;
+
+uint8_t scount = 0; //to swtich between tem and hum on main display
 
 const char* CONFIG_FILE = "settings.json";
 const char* LOG_DIR = "/logs";
@@ -231,10 +236,28 @@ void lcdPrint(String a, String b)
 
 void setup() {
   Serial.begin(115200);
+  Wire.begin(21,22);
+  rtc.begin();
+
   lcd.init();
   lcd.backlight();
   lcd.clear();
   lcdPrint("YAWOLART","Eggs Incubator");
+
+  if (!rtc.begin()) {
+    Serial.println("RTC not found");
+    lcdPrint("YAWOLART","RTC---NotWorking");
+    //while (1);
+  }
+  else
+  {
+    lcdPrint("YAWOLART","RTC------Working");
+  }
+  delay(1000);
+  if (!rtc.isrunning()) {
+    Serial.println("RTC not running, setting time");
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  }
   if (!sd.begin(chipSelect, SD_SCK_MHZ(16)))
   {
     Serial.println("Sd card cannot be read");
@@ -313,28 +336,32 @@ void setup() {
 void loop() {
 
   unsigned long currentTime = millis()/1000;
+  now = rtc.now();
 
   if(myConfig.proc == 0)
   {
     if(currentTime-lastTime >= 1)
     {
+      
       char line1[16];
-      char line2[16] = "DATE";
+      char line2[16]; // = "DATE";
       if(myConfig.setup == 0)
       {
-        snprintf(line1,16,"YAWOLART Setup");
+        snprintf(line1,16,"%d-%d-%4d  Setup",now.day(),now.month(),now.year());
       }
       else
       {
-        snprintf(line1,16,"TIME %c%c%c%c",myConfig.motorCal?' ':'M',myConfig.humSys?' ':'H',myConfig.temSys?' ':'T','S');
+        snprintf(line1,16,"%d-%d-%4d  %c%c%c%c",now.day(),now.month(),now.year(),myConfig.motorCal?' ':'M',myConfig.humSys?' ':'H',myConfig.temSys?' ':'T','S');
       }
+      if(scount <= 2) // show the tem on line2 for 3 second 
+        snprintf(line2,16,"%d:%d:%d T%.2fC",now.hour(),now.minute(),now.second(),getTem());
+      else // show the hum on line2 for 3 second after tem
+        snprintf(line2,16,"%d:%d:%d H%.2f%%",now.hour(),now.minute(),now.second(),getHum());
       lcdPrint(line1,line2);
+      scount = (scount+1)%6; //rotate the value of scount from 0 to 5; 0-2 for tem , 3-5 for hum
     }
     lastTime = currentTime;
   }
-  
- 
-  
 }
 
 float getTem()
