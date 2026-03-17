@@ -8,21 +8,60 @@
 #include <DallasTemperature.h>
 #include <Adafruit_SHT31.h>
 #include <time.h>
+#include <PID_v1.h>
 
 #define DEVICE_ID "AT010I"
 #define SDCARD_LIFESPAN 3
 
+//HEATING PID SYS
+#define WINDOW_SIZE_MS   1000    // burst-fire window (1s = 50 cycles @ 50Hz)
+#define RELAY_STEP       (WINDOW_SIZE_MS * 0.80)  // 80% power during tune
+#define NOISE_BAND       0.3     // °C — ignore oscillations smaller than this
+#define TUNE_CYCLES      4       // oscillation cycles to average
+#define TEMP_READ_MS     1000    // temperature read interval (ms)
+#define LCD_UPDATE_MS    500     // LCD refresh interval (ms)
+
+double setTemperature = 37.5;    // ← Egg incubator set-point (°C)
+
+double currentTemperature = 0.0;
+double pidOutput          = 0.0;
+double Kp = 1.0, Ki = 0.1, Kd = 0.0;   // overwritten by autoTuner()
+bool   heaterState        = false;
+
+enum HeatPhase { PHASE_WARMUP, PHASE_AUTOTUNING, PHASE_RUNNING };
+static HeatPhase heatPhase = PHASE_WARMUP;
+
+// Auto-tune internals
+static bool          relayOn      = false;
+static double        lastPeakHigh = -999.0;
+static double        lastPeakLow  =  999.0;
+static int           peakCount    = 0;
+static int           cycleCount   = 0;
+static double        periodSum    = 0.0;
+static double        amplitudeSum = 0.0;
+static unsigned long lastPeakTime = 0;
+static bool          lookForHigh  = true;
+static double        tempHist[5]  = {0};
+static int           histIdx      = 0;
+
+// Timing
+static unsigned long windowStart  = 0;
+static unsigned long lastTempRead = 0;
+static unsigned long lastLcdUpd   = 0;
+
+PID heaterPID(&currentTemperature, &pidOutput, &setTemperature,Kp, Ki, Kd, DIRECT);
+
 struct Settings {
-  float p;
-  float i;
-  float d;
-  uint8_t sTemp1;
+  double p;
+  double i;
+  double d;
+  float sTemp1;
   uint8_t sHum1;
-  uint8_t sTemp2;
+  float sTemp2;
   uint8_t sHum2;
-  uint8_t csTemp1;
+  float csTemp1;
   uint8_t csHum1;
-  uint8_t csTemp2;
+  int csTemp2;
   uint8_t csHum2;
   uint8_t settingPhase;
   uint8_t hatchingPhase;
@@ -45,7 +84,7 @@ struct Settings {
 };
 //myConfig = {1.5,0.3,0.05,0,0,0,0,0,0,0,0,0,"",0,0,0,0,0,0,0};
 enum ErrorType { NONE, ERROR_SLOW, ERROR_RAPID,ERROR_SINGLE, ERROR_TRIPLE };
-enum FunctionType {NO_FUNC, FRESH_START, CUSTM_START, DEMO_START, AUTO_SETUP, COMP_TEST};
+enum OperationType {NO_OPT, FRESH_START, CUSTM_START, DEMO_START, AUTO_TUNE, COMP_TEST};
 
 Settings myConfig;
 
@@ -56,10 +95,11 @@ const uint8_t ONE_WIRE_BUS = 4;
 
 const uint8_t fanRelay = 13;
 const uint8_t humidifierRelay = 14;
+const uint8_t heater = 15;
 const uint8_t waterLevel = 33;
 const uint8_t menuBott = 32;
 const uint8_t selectBott = 35;
-const uint8_t quickStartInc = 34;
+const uint8_t accessibilityBott = 34;
 const uint8_t limitSwitch1 = 36;
 const uint8_t limitSwitch2 = 39;
 const uint8_t buzz = 2;
@@ -70,11 +110,12 @@ const uint8_t motorEN = 27;
 SdExFat sd;
 DateTime now;
 LiquidCrystal_I2C lcd(0x27,16,2);
+
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 Adafruit_SHT31 sht31 = Adafruit_SHT31();
 ErrorType currentError = NONE;
-FunctionType currentFunction = NO_FUNC;
+OperationType currentOperation = NO_OPT;
 
 const char* CONFIG_FILE = "settings.json";
 const char* LOG_DIR = "/IncLogs";
@@ -84,11 +125,18 @@ const char* BRAND_NAME = "YAWOLART";
 unsigned long BuzzPrevTime = 0;
 bool buzzerState = false;
 int beepCount = 0;
-//int beepCycle = -1;
 unsigned long lastTime = 0;
 uint8_t scount = 0; //to swtich between tem and hum on main display
 uint8_t mainDisplayWait = 0; //wait time to return to the main display after going throught the main menu
-bool allowFunction = false; //allow a function to run
+bool allowOperation = false; //allow a Operation to run
+
+//PID control variable
+double Input, Output;
+
+//heater time window
+int WindowSize = 2000;             // 2 second window
+unsigned long windowStartTime;
+
 
 uint8_t menuPointer = 0;
 uint8_t optionPointer = 0;
@@ -101,9 +149,9 @@ uint8_t selectPointer = 0;
 
 void buzzerHandler();
 void setError();
-void setFunction();
+void setOperation();
 void mainMenu();
-void functionHandler();
+void operationHandler();
 float getTem();
 float getHum();
 bool setDate(bool);
@@ -111,8 +159,19 @@ bool setTime();
 float getIncDay();
 bool getWaterLevel();
 bool sdCardWarning(bool mode = 0); // mode 1 - print data ; mode 0 - only return
+bool accessibilityHandler();
 double daysBetween(int y1,int m1,int d1,int h1,int min1,int y2,int m2,int d2,int h2,int min2);
 
+static void runRelayTune();
+static void finishTune();
+static void updateLCD();
+
+static void finishTune();
+static void updateLCD();
+static void runRelayTune();
+void heatingSys();
+void autoTuner();
+void abortAutoTune();
 
 
 // 1. CREATE or OVERRIDE (Modify)
@@ -303,6 +362,8 @@ void setup() {
   Wire.begin(21,22);
   rtc.begin();
   sensors.begin();
+  sensors.setResolution(12);
+
   Serial.println("-YAWOLART-");
   Serial.println("Booting up...");
   Serial.println("Device type: Incubator");
@@ -316,6 +377,7 @@ void setup() {
 
   pinMode(fanRelay,OUTPUT);
   pinMode(humidifierRelay,OUTPUT);
+  pinMode(heater,OUTPUT);
   pinMode(buzz,OUTPUT);
   pinMode(motorIN1,OUTPUT);
   pinMode(motorIN2,OUTPUT);
@@ -323,7 +385,7 @@ void setup() {
   pinMode(menuBott,INPUT_PULLUP);
   pinMode(waterLevel,INPUT_PULLUP); // this pin dont have internal pullup
   pinMode(selectBott,INPUT); //this pin dont have internal pullup
-  pinMode(quickStartInc,INPUT); //this pin dont have internal pullup
+  pinMode(accessibilityBott,INPUT); //this pin dont have internal pullup
   pinMode(limitSwitch1,INPUT); //this pin dont have interal pullup
   pinMode(limitSwitch2,INPUT); //this pin dont have internal pullup
 
@@ -345,16 +407,25 @@ void setup() {
   // //relay test end
 
   // //input pin test 
+
+  digitalWrite(heater,LOW);
+  digitalWrite(fanRelay,LOW);
+  digitalWrite(humidifierRelay,LOW);
+  digitalWrite(motorIN1,LOW);
+  digitalWrite(motorIN2,LOW);
+  digitalWrite(motorEN,LOW);
+
   digitalWrite(buzz,HIGH);
   delay(1000);
   digitalWrite(buzz,LOW);
+
   // lcdPrint("input test","is running");
   // while(1)
   // {
   //   Serial.println();
   //   Serial.print("menuBott: "); Serial.println(digitalRead(menuBott));
   //   Serial.print("optionBoot: "); Serial.println(digitalRead(selectBott));
-  //   Serial.print("quickStartInc: "); Serial.println(digitalRead(quickStartInc));
+  //   Serial.print("accessibilityBott: "); Serial.println(digitalRead(accessibilityBott));
   //   Serial.print("waterLevel: "); Serial.println(digitalRead(waterLevel));
   //   Serial.print("limitSwitch1: "); Serial.println(digitalRead(limitSwitch1));
   //   Serial.print("limitSwitch2: "); Serial.println(digitalRead(limitSwitch2));
@@ -367,6 +438,12 @@ void setup() {
     lcdPrint(BRAND_NAME,"SHT3x not found");
   }
 
+  sensors.requestTemperatures();
+  delay(800);
+  double t = sensors.getTempCByIndex(0);
+  currentTemperature = (t != DEVICE_DISCONNECTED_C) ? t : 0.0;
+  if (t == DEVICE_DISCONNECTED_C)
+    Serial.println(F("WARNING: DS18B20 not found!"));
   
 
   if (!rtc.begin()) {
@@ -413,7 +490,7 @@ void setup() {
     {
       Serial.println("f----settings file created");
       lcdPrint(BRAND_NAME,"Data-----Written");
-      myConfig = {1.5,0.3,0.05,37,55,37,70,0,0,0,0,17,2,0,0,0,"",1,0,0,0,0,0,0,0,0,3};
+      myConfig = {1.0,0.1,0,37.5,55,37.3,70,0,0,0,0,17,2,0,0,0,"",1,0,0,0,0,0,0,0,0,3};
       saveJson(CONFIG_FILE, myConfig);
     }
 
@@ -465,6 +542,22 @@ void setup() {
   // loadJson(CONFIG_FILE, loadedConfig);
   printConfig(myConfig);
   
+  //pid sys setup
+  Kp = myConfig.p;
+  Ki = myConfig.i;
+  Kd = myConfig.d;
+
+
+  heaterPID.SetOutputLimits(0, WINDOW_SIZE_MS);
+  heaterPID.SetSampleTime(TEMP_READ_MS);
+  heaterPID.SetMode(MANUAL);
+  pidOutput = 0;
+
+  windowStart  = millis();
+  lastTempRead = millis() - TEMP_READ_MS;
+  lastLcdUpd   = millis();
+  heatPhase    = PHASE_WARMUP;
+  
   
   // if (loadJson(CONFIG_FILE, loadedConfig)) {
   //   printConfig(loadedConfig);
@@ -490,7 +583,12 @@ void setup() {
 void loop() {
 
   buzzerHandler();
-  //functionHandler();
+  accessibilityHandler();
+  if(allowOperation && currentOperation == AUTO_TUNE)
+  {
+    autoTuner();
+  }
+  //operationHandler();
 
   unsigned long currentTime = millis()/1000;
   now = rtc.now();
@@ -499,11 +597,11 @@ void loop() {
   if(myConfig.proc == 0) 
   {
     //hadling menu button press and its behavior 
-    // !allowFunction -> dont allow to enter the main menu while a function is running
-    if(!digitalRead(menuBott) && !allowFunction)
+    // !allowOperation -> dont allow to enter the main menu while a Operation is running
+    if(!digitalRead(menuBott) && !allowOperation)
     {
       while(!digitalRead(menuBott)); // waiting for the botton to reslease;
-      menuPointer = (menuPointer+1)%6;
+      menuPointer = (menuPointer+1)%5;
       mainMenu();
       mainDisplayWait = 5;
     }
@@ -512,19 +610,19 @@ void loop() {
     if(!digitalRead(selectBott))
     {
       while(!digitalRead(selectBott));
-      allowFunction = true;
-      functionHandler();
+      allowOperation = true;
+      operationHandler();
     }
 
     if(currentTime-lastTime >= 1)
     {
       lastTime = currentTime;
 
-      if(allowFunction && currentFunction != NO_FUNC)
-        functionHandler();
+      if(allowOperation && currentOperation != NO_OPT)
+        operationHandler();
 
       // MAIN DISPLAY
-      if(mainDisplayWait == 0 && !allowFunction)
+      if(mainDisplayWait == 0 && !allowOperation)
       {
         char line1[17];
         char line2[17];
@@ -542,8 +640,8 @@ void loop() {
         scount = (scount+1)%6; //rotating the value of scount from 0 to 5; 0-2 for tem , 3-5 for hum
         menuPointer = 0; //reset the menu pointer to zero to always start the menu from the beginning
         setError(NONE);
-        setFunction(NO_FUNC); //it the code reached here, there should be no active funciton running
-        allowFunction = false;  
+        setOperation(NO_OPT); //it the code reached here, there should be no active optiton running
+        allowOperation = false;  
       }
       //calculating wait time to return to the main display mainDisplayWait should not > 10
       if(mainDisplayWait > 0 && mainDisplayWait <= 15)
@@ -695,10 +793,10 @@ void setError(ErrorType type)
   }
 }
 
-void setFunction(FunctionType type)
+void setOperation(OperationType type)
 {
-  if(currentFunction != type)
-    currentFunction = type;
+  if(currentOperation != type)
+    currentOperation = type;
 }
 
 bool setIncStatus(bool mode)
@@ -733,6 +831,62 @@ bool setIncStatus(bool mode)
     return 0;
 }
 
+bool accessibilityHandler()
+{
+  //unsigned long accessCurrentTime = millis()/1000;
+  int i;
+  char tempLine[17];
+   if(myConfig.proc == 0)
+   {
+      if(allowOperation && !digitalRead(accessibilityBott))
+      {
+        digitalWrite(buzz,LOW);
+        for(i = 3; i>0; i--)
+        {
+          Serial.print("Operation Abort in "); Serial.println(i);
+          snprintf(tempLine,17,"in %d",i);
+          lcdPrint("Operation abort",tempLine);
+          delay(1000);
+          if(digitalRead(accessibilityBott))
+            break;
+        } 
+        if(i == 0)
+        {
+          allowOperation = false;
+          setOperation(NO_OPT);
+          Serial.println("Operation aborted by user");
+          lcdPrint("Operation","aborted by user");
+          while(!digitalRead(accessibilityBott));
+          if(currentOperation == AUTO_TUNE)
+            abortAutoTune();
+          return 1;
+        }
+      }
+
+      else if(!allowOperation && !digitalRead(accessibilityBott))
+      {
+        digitalWrite(buzz,LOW);
+        for(i = 3; i>0; i--)
+        {
+          Serial.print("Incuabtion Start in "); Serial.println(i);
+          snprintf(tempLine,17,"in %d",i);
+          lcdPrint("Incubation start",tempLine);
+          delay(1000);
+          if(digitalRead(accessibilityBott))
+            break;
+        } 
+        if(i == 0)
+        {
+          // write logic to start incubation;
+          Serial.println("Incubation started");
+          lcdPrint("Incubation","started");
+          while(!digitalRead(accessibilityBott));
+        }
+      }
+   }
+  return 0;
+}
+
 void lcdPrint(String a, String b)
 {
   lcd.clear();
@@ -742,33 +896,34 @@ void lcdPrint(String a, String b)
   lcd.print(b);
 }
 
+
 void mainMenu()
 {
   switch(menuPointer)
   {
     case 1:
       lcdPrint("MENU: Incubation","-> Fresh Start");
-      setFunction(FRESH_START);
+      setOperation(FRESH_START);
       break;
 
     case 2:
       lcdPrint("MENU: Incubation","-> Custom Start");
-      setFunction(CUSTM_START);
+      setOperation(CUSTM_START);
       break;
 
     case 3:
       lcdPrint("MENU: Incubation","-> Demo Start");
-      setFunction(DEMO_START);
+      setOperation(DEMO_START);
       break;
 
     case 4:
-      lcdPrint("MENU: Setup","-> Auto Setup");
-      setFunction(AUTO_SETUP);
+      lcdPrint("MENU: TuneHeater","-> Auto Tune");
+      setOperation(AUTO_TUNE);
       break;
 
     case 5:
       lcdPrint("MENU: Run Test","-> ComponentTest");
-      setFunction(COMP_TEST);
+      setOperation(COMP_TEST);
       break;
 
     default:
@@ -776,69 +931,60 @@ void mainMenu()
       char tempLine2[17];
       snprintf(tempLine2,17,"DeviceID: %s", DEVICE_ID);
       lcdPrint(BRAND_NAME,tempLine2);
-      setFunction(NO_FUNC);
+      setOperation(NO_OPT);
     }
       
   }
 }
 
-void functionHandler()
+void operationHandler()
 {
-  switch(currentFunction)
+  switch(currentOperation)
   {
-    case NO_FUNC:
+    case NO_OPT:
       lcdPrint("SSID:Inc_ART010I","IP:192.168.1.1");
-      mainDisplayWait = 10;
-      // dont allow function to run as NO_FUNC mean not be run any function.
-      // this line of code for safety even if somewhere in the code enable the allowFunction by mistake.
-      allowFunction = false; 
+      //mainDisplayWait = 10;
+      // dont allow Operation to run as NO_OPT mean not be run any Operation.
+      // this line of code for safety even if somewhere in the code enable the allowOperation by mistake.
+      allowOperation = false; 
       break;
     
     case FRESH_START:
       lcdPrint("Inct running","Fresh start");
       setError(ERROR_SLOW);
-      mainDisplayWait = 10;
+      digitalWrite(heater,HIGH);
+      //mainDisplayWait = 10;
       //while(1);
       break;
 
     case CUSTM_START:
       lcdPrint("Inct running","Custom start");
       setError(ERROR_RAPID);
-      mainDisplayWait = 10;
+      digitalWrite(heater,LOW);
+      //mainDisplayWait = 10;
       //while(1);
       break;
 
     case DEMO_START:
       lcdPrint("Inct running","Demo start");
-      setError(ERROR_SINGLE);
-      mainDisplayWait = 10;
+      setError(ERROR_TRIPLE);
+      //mainDisplayWait = 10;
       //while(1);
       break;
 
-    case AUTO_SETUP:
-      lcdPrint("Setup running","Auto setup");
-      setError(ERROR_TRIPLE);
-      mainDisplayWait = 10;
-      //while(1);
+    case AUTO_TUNE:
+      // this operation need separate timing system
+      // it have a separate handler on the main loop
       break;
 
     case COMP_TEST:
     {
-      char tempLine2[17];
-      float tempHum = getHum();
-      snprintf(tempLine2,17,"-> Hum: %.2f",tempHum);
-      lcdPrint("Test running",tempLine2);
-      setError(ERROR_SINGLE);
-      //mainDisplayWait = -1;
-      if(tempHum<62)
-        digitalWrite(humidifierRelay,HIGH);
-      else if(tempHum>62)
-        digitalWrite(humidifierRelay,LOW);
+      
     }
-      break;
+    break;
 
     default:
-      lcdPrint("Internal Err!","-> Invalid func");
+      lcdPrint("Internal Err!","-> Invalid opt");
       mainDisplayWait = 3;
   }
 }
@@ -929,3 +1075,310 @@ void buzzerHandler() {
       break;
   }
 }
+
+//---------------------PID------------------
+void autoTuner() {
+  Serial.println(F("\n=== autoTuner() started ==="));
+
+  // ── Phase 1: WARMUP — full power until within 5°C of target ──
+  Serial.println(F("Phase: WARMUP (full power)"));
+  while (heatPhase == PHASE_WARMUP) {
+    if(accessibilityHandler()) return; // to abort the operation safely in between
+    unsigned long now = millis();
+
+    if (now - lastTempRead >= TEMP_READ_MS) {
+      lastTempRead = now;
+      sensors.requestTemperatures();
+      double t = sensors.getTempCByIndex(0);
+      if (t != DEVICE_DISCONNECTED_C) currentTemperature = t;
+
+      pidOutput = WINDOW_SIZE_MS;   // full power
+
+      Serial.printf("[WARMUP] T=%.2f / SP=%.1f\n",
+                    currentTemperature, setTemperature);
+
+      if (currentTemperature >= setTemperature - 5.0) {
+        heatPhase    = PHASE_AUTOTUNING;
+        relayOn      = false;
+        pidOutput    = 0;
+        lookForHigh  = true;
+        peakCount    = 0;
+        cycleCount   = 0;
+        periodSum    = 0.0;
+        amplitudeSum = 0.0;
+        lastPeakTime = millis();
+        histIdx      = 0;
+        for (int i = 0; i < 5; i++) tempHist[i] = currentTemperature;
+        lcd.clear();
+        Serial.println(F("\nPhase: AUTOTUNING (relay oscillation)"));
+      }
+    }
+
+    // SSR burst-fire output
+    if (now - windowStart >= WINDOW_SIZE_MS) windowStart += WINDOW_SIZE_MS;
+    bool newState = (pidOutput > (double)(now - windowStart));
+    if (newState != heaterState) {
+      heaterState = newState;
+      digitalWrite(heater, heaterState ? HIGH : LOW);
+    }
+
+    // LCD
+    if (now - lastLcdUpd >= LCD_UPDATE_MS) {
+      lastLcdUpd = now;
+      updateLCD();
+    }
+
+    
+  }
+
+  // ── Phase 2: AUTOTUNING — relay oscillation ──
+  while (heatPhase == PHASE_AUTOTUNING) {
+    if(accessibilityHandler()) return; // to abort the operation safely in between
+    unsigned long now = millis();
+
+    if (now - lastTempRead >= TEMP_READ_MS) {
+      lastTempRead = now;
+      sensors.requestTemperatures();
+      double t = sensors.getTempCByIndex(0);
+      if (t != DEVICE_DISCONNECTED_C) currentTemperature = t;
+
+      runRelayTune();   // may call finishTune() which sets PHASE_RUNNING
+    }
+
+    // SSR output
+    if (now - windowStart >= WINDOW_SIZE_MS) windowStart += WINDOW_SIZE_MS;
+    bool newState = (pidOutput > (double)(now - windowStart));
+    if (newState != heaterState) {
+      heaterState = newState;
+      digitalWrite(heater, heaterState ? HIGH : LOW);
+    }
+
+    // LCD
+    if (now - lastLcdUpd >= LCD_UPDATE_MS) {
+      lastLcdUpd = now;
+      updateLCD();
+    }
+  }
+
+  Serial.println(F("=== autoTuner() complete"));
+  //add code to save to pid constants to the sd card;
+}
+
+void heatingSys() {
+  unsigned long now = millis();
+  
+  // 0. Safe self-init guard
+  // Runs once if autoTuner() was never called.
+  // Switches PID to AUTOMATIC with a bumpless transfer:
+  //   - reads current temperature first
+  //   - seeds pidOutput to a safe small value (not 0, not full)
+  //     so the integral starts calm with no overshoot spike
+  if (heaterPID.GetMode() == MANUAL) {
+    sensors.requestTemperatures();
+    double t = sensors.getTempCByIndex(0);
+    if (t != DEVICE_DISCONNECTED_C) currentTemperature = t;
+
+    // Seed output at 5% of window — just enough to start warming
+    // gently, avoids full-power blast on first compute
+    pidOutput = WINDOW_SIZE_MS * 0.05;
+
+    heaterPID.SetMode(AUTOMATIC);   // bumpless transfer seeds integral here
+    heatPhase    = PHASE_RUNNING;
+    windowStart  = millis();
+    lastTempRead = millis() - TEMP_READ_MS;
+    lastLcdUpd   = millis();
+
+    Serial.println(F("[heatingSys] "
+                     "running with existing Kp/Ki/Kd gains."));
+    Serial.printf("  Kp=%.4f  Ki=%.4f  Kd=%.4f\n", Kp, Ki, Kd);
+  }
+
+  // 1. Read temp & compute PID 
+  if (now - lastTempRead >= TEMP_READ_MS) {
+    lastTempRead = now;
+
+    sensors.requestTemperatures();
+    double t = sensors.getTempCByIndex(0);
+    if (t != DEVICE_DISCONNECTED_C) currentTemperature = t;
+
+    heaterPID.Compute();
+
+    Serial.printf("[RUN] T=%.2f SP=%.1f Out=%.0fms/%dms Heater=%s\n",
+                  currentTemperature, setTemperature,
+                  pidOutput, WINDOW_SIZE_MS, heaterState ? "ON" : "OFF");
+  }
+
+  // 2. Burst-fire SSR output 
+  if (now - windowStart >= WINDOW_SIZE_MS) windowStart += WINDOW_SIZE_MS;
+  bool newState = (pidOutput > (double)(now - windowStart));
+  if (newState != heaterState) {
+    heaterState = newState;
+    digitalWrite(heater, heaterState ? HIGH : LOW);
+  }
+
+  // 3. LCD 
+  if (now - lastLcdUpd >= LCD_UPDATE_MS) {
+    lastLcdUpd = now;
+    updateLCD();
+  }
+}
+
+static void runRelayTune() {
+  unsigned long now = millis();
+
+  // Relay switch
+  if (currentTemperature < setTemperature - NOISE_BAND) {
+    if (!relayOn) { relayOn = true;  pidOutput = RELAY_STEP; }
+  } else if (currentTemperature > setTemperature + NOISE_BAND) {
+    if (relayOn)  { relayOn = false; pidOutput = 0; }
+  }
+
+  // Rolling 5-point history for peak detection
+  tempHist[histIdx % 5] = currentTemperature;
+  histIdx++;
+  if (histIdx < 5) return;
+
+  double prev2 = tempHist[(histIdx - 5 + 5) % 5];
+  double prev1 = tempHist[(histIdx - 4 + 5) % 5];
+  double curr  = tempHist[(histIdx - 3 + 5) % 5];
+  double next1 = tempHist[(histIdx - 2 + 5) % 5];
+  double next2 = tempHist[(histIdx - 1 + 5) % 5];
+
+  bool isPeak   = (curr > prev1) && (curr > prev2) &&
+                  (curr > next1) && (curr > next2) &&
+                  (curr > setTemperature + NOISE_BAND);
+
+  bool isValley = (curr < prev1) && (curr < prev2) &&
+                  (curr < next1) && (curr < next2) &&
+                  (curr < setTemperature - NOISE_BAND);
+
+  if (lookForHigh && isPeak) {
+    if (peakCount > 0) {
+      double halfPeriod = (double)(now - lastPeakTime) / 1000.0;
+      double amplitude  = (curr - lastPeakLow) / 2.0;
+
+      if (halfPeriod > 0.5 && amplitude > NOISE_BAND) {
+        periodSum    += halfPeriod * 2.0;
+        amplitudeSum += amplitude;
+        cycleCount++;
+
+        Serial.printf("[TUNE] Cycle %d: Pu=%.2fs  a=%.3f degC\n",
+                      cycleCount, halfPeriod * 2.0, amplitude);
+
+        if (cycleCount >= TUNE_CYCLES) { finishTune(); return; }
+      }
+    }
+    lastPeakHigh = curr;
+    lastPeakTime = now;
+    peakCount++;
+    lookForHigh  = false;
+
+  } else if (!lookForHigh && isValley) {
+    lastPeakLow  = curr;
+    lastPeakTime = now;
+    peakCount++;
+    lookForHigh  = true;
+  }
+}
+
+void abortAutoTune() {
+  // 1. Heater OFF immediately
+  digitalWrite(heater, LOW);
+  heaterState = false;
+  pidOutput   = 0;
+
+  // 2. PID gains — use partial data if available, else defaults
+  if (cycleCount >= 1) {
+    double avgPu  = periodSum    / cycleCount;
+    double avgAmp = amplitudeSum / cycleCount;
+    double Ku     = (4.0 * (RELAY_STEP / 2.0)) / (PI * avgAmp);
+    Kp = 0.6 * Ku;
+    double Ti = 0.5 * avgPu;
+    double Td = 0.125 * avgPu;
+    Ki = (Ti > 0) ? (Kp / Ti) : 0.0;
+    Kd = Kp * Td;
+    Serial.println(F("[ABORT] Using partial tune data."));
+  } else {
+    Kp = 1.0; Ki = 0.1; Kd = 0.0;
+    Serial.println(F("[ABORT] No tune data — using default gains."));
+  }
+
+  // 3. Bumpless transfer into AUTOMATIC
+  pidOutput = WINDOW_SIZE_MS * 0.05;
+  heaterPID.SetTunings(Kp, Ki, Kd);
+  heaterPID.SetMode(AUTOMATIC);
+
+  // 4. State and timing
+  heatPhase    = PHASE_RUNNING;
+  windowStart  = millis();
+  lastTempRead = millis() - TEMP_READ_MS;
+  lastLcdUpd   = millis();
+
+  Serial.printf("[ABORT] Kp=%.4f Ki=%.4f Kd=%.4f\n", Kp, Ki, Kd);
+  Serial.println(F("[ABORT] autoTuner aborted — heatingSys() safe to run."));
+
+  lcd.clear();
+}
+
+//  Internal: Compute gains, apply to PID
+static void finishTune() {
+  double avgPu  = periodSum    / cycleCount;
+  double avgAmp = amplitudeSum / cycleCount;
+  double Ku     = (4.0 * (RELAY_STEP / 2.0)) / (PI * avgAmp);
+
+  Kp = 0.6  * Ku;
+  double Ti = 0.5   * avgPu;
+  double Td = 0.125 * avgPu;
+  Ki = (Ti > 0) ? (Kp / Ti) : 0.0;
+  Kd = Kp * Td;
+
+  Serial.println(F("\n====== TUNE COMPLETE ======"));
+  Serial.printf("  Pu=%.2fs  a=%.3f degC  Ku=%.4f\n", avgPu, avgAmp, Ku);
+  Serial.printf("  Kp=%.4f  Ki=%.4f  Kd=%.4f\n", Kp, Ki, Kd);
+  Serial.println(F("===========================\n"));
+
+  //saving data to sd card
+  myConfig.p = Kp;
+  myConfig.i = Ki;
+  myConfig.d = Kd;
+  saveJson(CONFIG_FILE,myConfig);
+
+  heaterPID.SetTunings(Kp, Ki, Kd);
+  heaterPID.SetMode(AUTOMATIC);
+  heatPhase = PHASE_RUNNING;
+
+  lcd.clear();
+  lcd.setCursor(0, 0); lcd.print(F("Tune Done! PID  "));
+  char buf[17];
+  snprintf(buf, sizeof(buf), "Kp=%.2f Ki=%.3f ", Kp, Ki);
+  lcd.setCursor(0, 1); lcd.print(buf);
+  delay(3000);
+  lcd.clear();
+}
+
+
+//  Internal: LCD display
+static void updateLCD() {
+  char row0[17], row1[17];
+
+  if (heatPhase == PHASE_WARMUP) {
+    snprintf(row0, sizeof(row0), "WARMUP  SP:%5.1f", setTemperature);
+    snprintf(row1, sizeof(row1), "CT:%5.1f        ", currentTemperature);
+
+  } else if (heatPhase == PHASE_AUTOTUNING) {
+    snprintf(row0, sizeof(row0), "TUNING  SP:%5.1f", setTemperature);
+    snprintf(row1, sizeof(row1), "CT:%5.1f CYC:%d/%d",
+             currentTemperature, cycleCount, TUNE_CYCLES);
+
+  } else {
+    snprintf(row0, sizeof(row0), "SP:%5.1f CT:%5.1f",
+             setTemperature, currentTemperature);
+    snprintf(row1, sizeof(row1), "OUT:%4.0fms %s  ",
+             pidOutput, heaterState ? "[ON ]" : "[OFF]");
+  }
+
+  row0[16] = '\0'; row1[16] = '\0';
+  lcd.setCursor(0, 0); lcd.print(row0);
+  lcd.setCursor(0, 1); lcd.print(row1);
+}
+
