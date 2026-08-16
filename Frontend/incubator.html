@@ -1,0 +1,1431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YAWOLART – Egg Incubator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f14;
+    --surface: #13161e;
+    --surface2: #1a1e28;
+    --border: #242837;
+    --accent: #e8a020;
+    --accent2: #3dbf8a;
+    --danger: #e84040;
+    --warn: #e8a020;
+    --text: #e8eaf0;
+    --muted: #6b7180;
+    --mono: 'Space Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    font-size: 14px;
+  }
+
+  /* ── TOPBAR ── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .brand {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  .brand span {
+    display: block;
+    font-size: 9px;
+    font-weight: 400;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    margin-top: 2px;
+  }
+  .topbar-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  /* ── SD WARNING ── */
+  .sd-warning {
+    background: #2a1010;
+    border-bottom: 2px solid var(--danger);
+    padding: 10px 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--danger);
+    display: none;
+  }
+  .sd-warning.show { display: flex; }
+  .sd-warning-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--danger);
+    animation: pulse-red 1s ease-in-out infinite;
+  }
+
+  /* ── MAIN LAYOUT ── */
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 24px 20px;
+  }
+
+  /* ── SECTION HEADER ── */
+  .section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    padding-left: 2px;
+  }
+
+  /* ── GRID CARDS ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  @media(max-width: 600px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr 1fr; }
+  }
+  @media(max-width: 400px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .card-value {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1;
+  }
+  .card-value .unit {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 400;
+    margin-left: 3px;
+  }
+  .card-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  .card-accent-bar {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--accent);
+    border-radius: 4px 0 0 4px;
+  }
+  .card-accent-bar.green { background: var(--accent2); }
+  .card-accent-bar.red { background: var(--danger); }
+
+  /* SET POINT CARD */
+  .setpoint-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .setpoint-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+  .setpoint-val {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .setpoint-val.hum { color: var(--accent2); }
+
+  /* ── STATUS CARD ── */
+  .status-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin-bottom: 14px;
+  }
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    padding: 4px 12px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .status-badge.active {
+    background: #1a2e1a;
+    color: var(--accent2);
+    border: 1px solid #2d5c2d;
+  }
+  .status-badge.inactive {
+    background: #1e1e22;
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .badge-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .badge-dot.pulse { animation: pulse-green 1.4s ease-in-out infinite; }
+
+  .status-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+  }
+  .status-item { flex: 1; min-width: 100px; }
+  .status-item-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .status-item-val {
+    font-family: var(--mono);
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .mode-pill {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .mode-pill.fresh { background: #1a2030; color: #6baed6; border: 1px solid #2a4060; }
+  .mode-pill.custom { background: #2a1a2e; color: #c47fc0; border: 1px solid #502060; }
+
+  /* ── BUTTONS ── */
+  .btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 9px 18px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .btn-outline {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--muted);
+  }
+  .btn-outline:hover { border-color: var(--text); color: var(--text); }
+  .btn-accent {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #0d0f14;
+  }
+  .btn-accent:hover { opacity: 0.88; }
+  .btn-green {
+    background: transparent;
+    border-color: var(--accent2);
+    color: var(--accent2);
+  }
+  .btn-green:hover { background: rgba(61,191,138,0.08); }
+  .btn-danger {
+    background: transparent;
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+  .btn-danger:hover { background: rgba(232,64,64,0.08); }
+  .btn-muted {
+    background: var(--surface2);
+    border-color: var(--border);
+    color: var(--muted);
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  .btn-sm { padding: 6px 12px; font-size: 10px; }
+
+  /* ── DIVIDER ── */
+  .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+  /* ── FORM ELEMENTS ── */
+  .form-group { margin-bottom: 16px; }
+  .form-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .form-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 9px 12px;
+    width: 100%;
+    transition: border-color 0.15s;
+    outline: none;
+  }
+  .form-input:focus { border-color: var(--accent); }
+  .form-input:disabled { opacity: 0.4; cursor: not-allowed; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-note {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+
+  /* ── PAGE SECTIONS ── */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ── WARNING BOX ── */
+  .warning-box {
+    background: #1e1500;
+    border: 1px solid #4a3200;
+    border-left: 3px solid var(--warn);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+    font-size: 12px;
+    color: #c8a050;
+    line-height: 1.6;
+  }
+  .warning-box strong { color: var(--warn); }
+
+  .locked-msg {
+    background: #1a0e0e;
+    border: 1px solid #3a1818;
+    border-left: 3px solid var(--danger);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+    font-size: 12px;
+    color: #c05050;
+    display: none;
+  }
+  .locked-msg.show { display: block; }
+
+  /* ── ANIMATIONS ── */
+  @keyframes pulse-green {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  @keyframes pulse-red {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .card, .status-card, .setpoint-card {
+    animation: fade-in 0.3s ease both;
+  }
+
+  /* ── TOAST ── */
+  .toast {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 18px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent2);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    transform: translateY(20px);
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.25s;
+    z-index: 999;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+
+  /* ── NAV ── */
+  .page-nav {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+  }
+  .nav-tab {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 8px 16px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: all 0.15s;
+  }
+  .nav-tab:hover { color: var(--text); }
+  .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ── REFRESH ── */
+  .refresh-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .last-update {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+  }
+  .spinning { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Phase progress */
+  .phase-bar-wrap {
+    margin-top: 12px;
+    background: var(--bg);
+    border-radius: 4px;
+    height: 4px;
+    overflow: hidden;
+  }
+  .phase-bar {
+    height: 100%;
+    background: var(--accent2);
+    border-radius: 4px;
+    transition: width 0.5s ease;
+  }
+  .phase-bar.hatching { background: var(--accent); }
+
+  /* Time sync */
+  /* ── POPUP OVERLAY (contact + time sync) ── */
+  .popup-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.65);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+  }
+  .popup-overlay.show { display: flex; }
+  .popup-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 28px 24px;
+    width: 90%;
+    max-width: 380px;
+    position: relative;
+    animation: fade-in 0.2s ease;
+  }
+  .popup-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 18px;
+  }
+  .popup-close {
+    position: absolute;
+    top: 14px; right: 16px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 2px 6px;
+    font-family: var(--mono);
+  }
+  .popup-close:hover { color: var(--text); }
+  .contact-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 13px 14px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    text-decoration: none;
+    transition: border-color 0.15s;
+  }
+  .contact-item:last-child { margin-bottom: 0; }
+  .contact-item:hover { border-color: var(--accent); }
+  .contact-icon {
+    font-family: var(--mono);
+    font-size: 15px;
+    width: 26px;
+    text-align: center;
+    flex-shrink: 0;
+    color: var(--accent);
+  }
+  .contact-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 3px;
+  }
+  .contact-value {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+  }
+  .popup-body {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 18px;
+    line-height: 1.6;
+  }
+  .popup-actions {
+    display: flex;
+    gap: 10px;
+  }
+
+  /* ── LOG FILES ── */
+  .log-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    gap: 12px;
+  }
+  .log-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    word-break: break-all;
+  }
+  .log-size {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+  .log-empty {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 24px 0;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="brand">
+    YAWOLART
+    <span>the seamless connectivity of your devices</span>
+  </div>
+  <div class="topbar-actions">
+    <button class="btn btn-outline btn-sm" onclick="showTimeSyncModal()">⏱ Sync Time</button>
+    <button class="btn btn-outline btn-sm" onclick="openContact()">Contact Us</button>
+  </div>
+</div>
+
+<!-- SD CARD WARNING -->
+<div class="sd-warning" id="sdWarning">
+  <div class="sd-warning-dot"></div>
+  SD CARD NOT FOUND — Please insert SD card and restart the device
+</div>
+
+<!-- PAGE NAV -->
+<div class="container">
+  <div class="page-nav">
+    <button class="nav-tab active" onclick="showTab('home', this)">Dashboard</button>
+    <button class="nav-tab" onclick="showTab('custom', this)" id="customTab">Custom Incubation</button>
+    <button class="nav-tab" onclick="showTab('sysconfig', this)" id="sysconfigTab">System Config</button>
+    <button class="nav-tab" onclick="showTab('logs', this)" id="logsTab">Log Files</button>
+  </div>
+
+  <!-- ══════ HOME PAGE ══════ -->
+  <div class="page active" id="page-home">
+
+    <div class="refresh-row">
+      <div class="last-update" id="lastUpdate">Fetching data…</div>
+      <button class="btn btn-outline btn-sm" onclick="fetchData(true)">
+        <span id="refreshIcon">↻</span> Refresh
+      </button>
+    </div>
+
+    <!-- TEMP + HUMIDITY CURRENT -->
+    <div class="section-label">Live Readings</div>
+    <div class="grid-3">
+      <div class="card">
+        <div class="card-accent-bar"></div>
+        <div class="card-label">Temperature</div>
+        <div class="card-value" id="curTemp">--<span class="unit">°C</span></div>
+        <div class="card-sub">Current reading</div>
+      </div>
+      <div class="card">
+        <div class="card-accent-bar green"></div>
+        <div class="card-label">Humidity</div>
+        <div class="card-value" id="curHum">--<span class="unit">%RH</span></div>
+        <div class="card-sub">Current reading</div>
+      </div>
+      <div class="card" id="waterCard">
+        <div class="card-accent-bar green" id="waterAccent"></div>
+        <div class="card-label">Water Level</div>
+        <div class="card-value" style="font-size:18px;" id="waterStatus">--</div>
+        <div class="card-sub" id="waterSub">Waiting for data</div>
+      </div>
+    </div>
+
+    <!-- SET POINT (only when active) -->
+    <div id="setpointRow" style="display:none;">
+      <div class="section-label">Set Points</div>
+      <div class="setpoint-card">
+        <div>
+          <div class="setpoint-label">Set Temperature</div>
+          <div class="setpoint-val" id="setTempVal">--°C</div>
+        </div>
+        <div>
+          <div class="setpoint-label">Set Humidity</div>
+          <div class="setpoint-val hum" id="setHumVal">--%RH</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- INCUBATION STATUS -->
+    <div class="section-label">Incubation Status</div>
+    <div class="status-card">
+      <div id="statusBadge" class="status-badge inactive">
+        <span class="badge-dot"></span>
+        NOT ACTIVE
+      </div>
+      <div id="incubationDetails" style="display:none;">
+        <div class="status-row" id="statusRow"></div>
+        <div class="phase-bar-wrap">
+          <div class="phase-bar" id="phaseBar" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- START INCUBATION (shown when proc == 0) -->
+    <div id="startRow" style="display:none; margin-top:14px;">
+      <div class="section-label">Start Incubation</div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-green" onclick="startInc(1)">&#9654; Fresh Start</button>
+        <button class="btn btn-outline" onclick="startInc(2)">&#9654; Custom Start</button>
+      </div>
+    </div>
+
+    <!-- STOP INCUBATION (shown when proc > 0) -->
+    <div id="stopRow" style="display:none; margin-top:14px;">
+      <button class="btn btn-danger" onclick="stopInc()">Stop Incubation</button>
+    </div>
+
+
+
+  </div><!-- /home -->
+
+  <!-- ══════ CUSTOM INCUBATION PAGE ══════ -->
+  <div class="page" id="page-custom">
+    <div class="locked-msg" id="customLocked">
+      Custom incubation setup is locked while an incubation is active. Stop the current incubation first.
+    </div>
+
+    <div id="customForm">
+
+      <div class="section-label">Incubation Phase Days</div>
+      <div class="form-row" style="margin-bottom:16px;">
+        <div class="form-group">
+          <label class="form-label">Setting Phase Days (csettingPhase)</label>
+          <input type="number" class="form-input" id="csettingPhase" min="1" max="60" placeholder="e.g. 18">
+          <div class="form-note">Must be greater than 0</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Hatching Phase Days (chatchingPhase)</label>
+          <input type="number" class="form-input" id="chatchingPhase" min="0" max="30" placeholder="e.g. 3">
+        </div>
+      </div>
+
+      <div class="section-label">Setting Phase Parameters</div>
+      <div class="form-row" style="margin-bottom:16px;">
+        <div class="form-group">
+          <label class="form-label">Temperature – Setting Phase (csTemp1) °C</label>
+          <input type="number" class="form-input" id="csTemp1" step="0.1" placeholder="e.g. 37.5">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Humidity – Setting Phase (csHum1) %</label>
+          <input type="number" class="form-input" id="csHum1" min="0" max="100" placeholder="e.g. 55">
+        </div>
+      </div>
+
+      <div class="section-label">Hatching Phase Parameters</div>
+      <div class="form-row" style="margin-bottom:20px;">
+        <div class="form-group">
+          <label class="form-label">Temperature – Hatching Phase (csTemp2) °C</label>
+          <input type="number" class="form-input" id="csTemp2" step="0.1" placeholder="e.g. 37.0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Humidity – Hatching Phase (csHum2) %</label>
+          <input type="number" class="form-input" id="csHum2" min="0" max="100" placeholder="e.g. 65">
+        </div>
+      </div>
+
+      <button class="btn btn-accent" onclick="saveCustom()">Save Custom Parameters</button>
+    </div>
+  </div><!-- /custom -->
+
+  <!-- ══════ SYSTEM CONFIG PAGE ══════ -->
+  <div class="page" id="page-sysconfig">
+    <div class="locked-msg" id="sysconfigLocked">
+      System configuration is locked while an incubation is active. Stop the current incubation first.
+    </div>
+
+    <div id="sysconfigForm">
+      <div class="warning-box">
+        <strong>⚠ Warning:</strong> System configuration parameters require <strong>low-level technical knowledge</strong>. Incorrect values may affect incubation quality, hardware safety, and PID control behaviour. Do not modify unless you understand the implications. All changes are written directly to <code>settings.json</code> on the SD card.
+      </div>
+
+      <div class="section-label">PID Heating Control</div>
+      <div class="form-row" style="margin-bottom:16px;">
+        <div class="form-group">
+          <label class="form-label">Kp – Proportional Gain</label>
+          <input type="number" class="form-input" id="cfg_p" step="0.001" placeholder="e.g. 1.5">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Ki – Integral Gain</label>
+          <input type="number" class="form-input" id="cfg_i" step="0.001" placeholder="e.g. 0.3">
+        </div>
+      </div>
+      <div class="form-group" style="max-width:300px; margin-bottom:16px;">
+        <label class="form-label">Kd – Derivative Gain</label>
+        <input type="number" class="form-input" id="cfg_d" step="0.001" placeholder="e.g. 0.05">
+      </div>
+
+      <div class="section-label">Safety & Alerts</div>
+      <div class="form-row" style="margin-bottom:16px;">
+        <div class="form-group">
+          <label class="form-label">Temperature Warning Threshold (°C)</label>
+          <input type="number" class="form-input" id="cfg_temWarn" placeholder="e.g. 2">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Humidity Warning Threshold (%)</label>
+          <input type="number" class="form-input" id="cfg_humWarn" placeholder="e.g. 5">
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label class="form-label">Safety Mode</label>
+        <select class="form-input" id="cfg_safety">
+          <option value="1">Enabled</option>
+          <option value="0">Disabled</option>
+        </select>
+      </div>
+
+      <div class="section-label">Motor Control</div>
+      <div class="form-row" style="margin-bottom:14px;">
+        <div class="form-group">
+          <label class="form-label">Motor PWM</label>
+          <input type="number" class="form-input" id="cfg_motorPwm" min="0" max="255" placeholder="0–255">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Move Interval (min)</label>
+          <input type="number" class="form-input" id="cfg_moveInterval" placeholder="e.g. 60">
+        </div>
+      </div>
+      <div class="form-group" style="max-width:300px; margin-bottom:20px;">
+        <label class="form-label">Motor Travel Timeout (seconds)</label>
+        <input type="number" class="form-input" id="cfg_motorTimeOut" min="5" max="300" placeholder="e.g. 30">
+        <div class="form-note">Maximum time allowed for one full tray movement before safety cutoff.</div>
+      </div>
+
+      <div class="section-label">Power Loss Recovery</div>
+      <div class="form-group" style="max-width:300px; margin-bottom:20px;">
+        <label class="form-label">Warm Up Threshold (°C)</label>
+        <input type="number" class="form-input" id="cfg_restartErr" step="0.1" min="0" placeholder="e.g. 1.0">
+      </div>
+
+      <div class="section-label">Fresh Incubation Defaults</div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <div class="form-group">
+          <label class="form-label">Temp – Setting Phase (sTemp1) °C</label>
+          <input type="number" class="form-input" id="cfg_sTemp1" step="0.1">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Humidity – Setting Phase (sHum1) %</label>
+          <input type="number" class="form-input" id="cfg_sHum1" min="0" max="100">
+        </div>
+      </div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <div class="form-group">
+          <label class="form-label">Temp – Hatching Phase (sTemp2) °C</label>
+          <input type="number" class="form-input" id="cfg_sTemp2" step="0.1">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Humidity – Hatching Phase (sHum2) %</label>
+          <input type="number" class="form-input" id="cfg_sHum2" min="0" max="100">
+        </div>
+      </div>
+      <div class="form-row" style="margin-bottom:20px;">
+        <div class="form-group">
+          <label class="form-label">Setting Phase Days (settingPhase)</label>
+          <input type="number" class="form-input" id="cfg_settingPhase">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Hatching Phase Days (hatchingPhase)</label>
+          <input type="number" class="form-input" id="cfg_hatchingPhase">
+        </div>
+      </div>
+
+      <button class="btn btn-danger" onclick="saveSysConfig()">⚠ Save System Configuration</button>
+    </div>
+  </div><!-- /sysconfig -->
+
+
+  <!-- ══════ LOGS PAGE ══════ -->
+  <div class="page" id="page-logs">
+    <div class="refresh-row">
+      <div class="last-update" id="logsStatus">Click refresh to load log files</div>
+      <button class="btn btn-outline btn-sm" onclick="loadLogs(true)">
+        <span id="logsRefreshIcon">↻</span> Refresh
+      </button>
+    </div>
+
+    <div class="section-label">Log Files on SD Card</div>
+    <div id="logsContainer">
+      <div style="color:var(--muted); font-family:var(--mono); font-size:12px; padding:20px 0;">
+        No files loaded yet. Click refresh.
+      </div>
+    </div>
+  </div><!-- /logs -->
+
+</div><!-- /container -->
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── STATE ────────────────────────────────────────────────────
+let cfg = {};
+let curTemp = null;
+let curHum  = null;
+let sdOk    = true;
+let activeTab = 'home';
+let liveDate      = null;   // YYYYMMDD integer from /api/live (today's date on the device)
+let waterLevelOk  = null;   // true = water OK, false = needs water
+// When the ESP32 restarts after start/stop we poll until it comes back
+let waitingForRestart = false;
+
+// ─── INIT ─────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  fetchData();
+  setInterval(fetchData, 5000);
+});
+
+// ─── FETCH ────────────────────────────────────────────────────
+async function fetchData(manual = false) {
+  const icon = document.getElementById('refreshIcon');
+  if (manual) icon.classList.add('spinning');
+
+  // While waiting for device restart, just show a spinner
+  if (waitingForRestart) {
+    document.getElementById('lastUpdate').textContent = 'Waiting for device to restart…';
+    try {
+      const probe = await fetch('/api/live', { signal: AbortSignal.timeout(2000) });
+      if (probe.ok) {
+        waitingForRestart = false;
+        showToast('Device back online ✓');
+      }
+    } catch { /* still restarting */ }
+    if (manual) setTimeout(() => icon.classList.remove('spinning'), 400);
+    return;
+  }
+
+  try {
+    const [settRes, liveRes] = await Promise.all([
+      fetch('/api/settings', { signal: AbortSignal.timeout(4000) }),
+      fetch('/api/live',     { signal: AbortSignal.timeout(4000) })
+    ]);
+
+    if (settRes.ok) {
+      cfg  = await settRes.json();
+      sdOk = true;
+    } else {
+      sdOk = false;
+    }
+
+    if (liveRes.ok) {
+      const live = await liveRes.json();
+      curTemp  = live.temperature;
+      curHum   = live.humidity;
+      liveDate     = live.rtcDate || null;  // YYYYMMDD from device RTC
+      // HIGH pin = needs water, getWaterLevel() returns true when HIGH
+      waterLevelOk = (live.waterLevel === false || live.waterLevel === 'false');
+      if (live.sdOk !== undefined) sdOk = live.sdOk;
+    }
+
+  } catch(e) {
+    // No server (dev/demo mode) — use mock data
+    sdOk = true;
+    cfg = {
+      p: 1.5, i: 0.3, d: 0.05, safety: true,
+      sTemp1: 37.5, sHum1: 55, sTemp2: 37.0, sHum2: 65,
+      csTemp1: 37.2, csHum1: 58, csTemp2: 36.8, csHum2: 70,
+      settingPhase: 18, hatchingPhase: 3,
+      csettingPhase: 16, chatchingPhase: 4,
+      humWarn: 5, temWarn: 2,
+      proc: 1,
+      logFile: "log_001.csv",
+      motorPwm: 180, moveInterval: 60,
+      time: 830, date: 20260319,
+      sdate: 20260314, sSetAge: 3
+    };
+    curTemp = 37.4;
+    curHum  = 56.2;
+  }
+
+  renderDashboard();
+  if (manual) {
+    setTimeout(() => icon.classList.remove('spinning'), 400);
+    showToast('Data refreshed');
+  }
+  document.getElementById('lastUpdate').textContent =
+    'Last update: ' + new Date().toLocaleTimeString();
+}
+
+// ─── RENDER ALL ───────────────────────────────────────────────
+// renderDashboard: called on every auto-refresh — dashboard only
+function renderDashboard() {
+  renderSDWarning();
+  renderLive();
+  renderWaterLevel();
+  renderStatus();
+  renderSetpoints();
+  renderStartStop();
+  renderLockState();
+}
+
+// renderForms: called only after a save or manual tab open
+function renderForms() {
+  renderConfigForms();
+}
+
+// renderAll: called after save so everything syncs
+function renderAll() {
+  renderDashboard();
+  renderForms();
+}
+
+function renderSDWarning() {
+  document.getElementById('sdWarning').classList.toggle('show', !sdOk);
+}
+
+function renderLive() {
+  const tEl = document.getElementById('curTemp');
+  const hEl = document.getElementById('curHum');
+  tEl.innerHTML = (curTemp !== null ? curTemp.toFixed(1) : '--') + '<span class="unit">°C</span>';
+  hEl.innerHTML = (curHum  !== null ? curHum.toFixed(1)  : '--') + '<span class="unit">%RH</span>';
+}
+
+function renderWaterLevel() {
+  const statusEl = document.getElementById('waterStatus');
+  const subEl    = document.getElementById('waterSub');
+  const accentEl = document.getElementById('waterAccent');
+  const cardEl   = document.getElementById('waterCard');
+  if (!statusEl) return;
+
+  if (waterLevelOk === null) {
+    statusEl.textContent = '--';
+    subEl.textContent    = 'Waiting for data';
+    accentEl.className   = 'card-accent-bar';
+    return;
+  }
+
+  if (waterLevelOk) {
+    statusEl.textContent       = 'OK';
+    statusEl.style.color       = 'var(--accent2)';
+    subEl.textContent          = 'Water level sufficient';
+    accentEl.className         = 'card-accent-bar green';
+    cardEl.style.borderColor   = '';
+  } else {
+    statusEl.textContent       = 'LOW';
+    statusEl.style.color       = 'var(--danger)';
+    subEl.textContent          = 'Refill water required';
+    accentEl.className         = 'card-accent-bar red';
+    cardEl.style.borderColor   = 'var(--danger)';
+  }
+}
+
+function renderSetpoints() {
+  const active = cfg.proc > 0;
+  document.getElementById('setpointRow').style.display = active ? '' : 'none';
+  if (!active) return;
+
+  const incDay    = calcIncDay();
+  const sPhase    = cfg.proc === 2 ? cfg.csettingPhase : cfg.settingPhase;
+  const inSetting = incDay <= sPhase;
+
+  const st = (cfg.proc === 2)
+    ? (inSetting ? cfg.csTemp1 : cfg.csTemp2)
+    : (inSetting ? cfg.sTemp1  : cfg.sTemp2);
+  const sh = (cfg.proc === 2)
+    ? (inSetting ? cfg.csHum1 : cfg.csHum2)
+    : (inSetting ? cfg.sHum1  : cfg.sHum2);
+
+  document.getElementById('setTempVal').textContent = (st || 0).toFixed(1) + '°C';
+  document.getElementById('setHumVal').textContent  = (sh || 0) + '%RH';
+}
+
+function renderStatus() {
+  const active = cfg.proc > 0;
+  const badge  = document.getElementById('statusBadge');
+  const detail = document.getElementById('incubationDetails');
+
+  if (!active) {
+    badge.className = 'status-badge inactive';
+    badge.innerHTML = '<span class="badge-dot"></span> NOT ACTIVE';
+    detail.style.display = 'none';
+    return;
+  }
+
+  badge.className = 'status-badge active';
+  badge.innerHTML = '<span class="badge-dot pulse"></span> ACTIVE';
+  detail.style.display = '';
+
+  const modeLabel  = cfg.proc === 2 ? 'Custom' : 'Fresh';
+  const modeCls    = cfg.proc === 2 ? 'custom' : 'fresh';
+  const incDay     = calcIncDay();
+  const sPhase     = cfg.proc === 2 ? cfg.csettingPhase  : cfg.settingPhase;
+  const hPhase     = cfg.proc === 2 ? cfg.chatchingPhase : cfg.hatchingPhase;
+  const inSetting  = incDay <= sPhase;
+  const phaseName  = inSetting ? 'Setting' : 'Hatching';
+  const phaseDays  = inSetting ? sPhase : hPhase;
+  const dayInPhase = inSetting ? incDay : (incDay - sPhase);
+  const totalDays  = sPhase + hPhase;
+  const pct        = totalDays > 0 ? Math.min(100, (incDay / totalDays) * 100) : 0;
+
+  document.getElementById('statusRow').innerHTML = `
+    <div class="status-item">
+      <div class="status-item-label">Day</div>
+      <div class="status-item-val">Day ${incDay}</div>
+    </div>
+    <div class="status-item">
+      <div class="status-item-label">Phase</div>
+      <div class="status-item-val">${phaseName}</div>
+    </div>
+    <div class="status-item">
+      <div class="status-item-label">Phase Progress</div>
+      <div class="status-item-val">${dayInPhase} / ${phaseDays} days</div>
+    </div>
+    <div class="status-item">
+      <div class="status-item-label">Mode</div>
+      <div class="status-item-val"><span class="mode-pill ${modeCls}">${modeLabel}</span></div>
+    </div>
+  `;
+
+  const bar = document.getElementById('phaseBar');
+  bar.style.width = pct + '%';
+  bar.className = 'phase-bar' + (inSetting ? '' : ' hatching');
+}
+
+function renderStartStop() {
+  const active = cfg.proc > 0;
+  document.getElementById('startRow').style.display = active ? 'none' : '';
+  document.getElementById('stopRow').style.display  = active ? ''     : 'none';
+}
+
+function calcIncDay() {
+  // cfg.date  = incubation start date (YYYYMMDD), written atomically at start
+  // liveDate  = today's date on the device (YYYYMMDD) from /api/live rtcDate field
+  // Fall back to client date only if liveDate not yet received
+  if (!cfg.date) return 1;
+  const toDate = n => {
+    n = parseInt(n);
+    const y = Math.floor(n / 10000);
+    const m = Math.floor((n % 10000) / 100);
+    const d = n % 100;
+    return new Date(y, m - 1, d);
+  };
+  const start   = toDate(cfg.date);
+  const nowDate = liveDate ? toDate(liveDate) : new Date();
+  const diff    = Math.floor((nowDate - start) / 86400000);
+  return Math.max(1, diff + 1);
+}
+
+function renderConfigForms() {
+  setVal('csTemp1',        cfg.csTemp1);
+  setVal('csHum1',         cfg.csHum1);
+  setVal('csTemp2',        cfg.csTemp2);
+  setVal('csHum2',         cfg.csHum2);
+  setVal('csettingPhase',  cfg.csettingPhase);
+  setVal('chatchingPhase', cfg.chatchingPhase);
+
+  setVal('cfg_p',             cfg.p);
+  setVal('cfg_i',             cfg.i);
+  setVal('cfg_d',             cfg.d);
+  setVal('cfg_temWarn',       cfg.temWarn);
+  setVal('cfg_humWarn',       cfg.humWarn);
+  setVal('cfg_motorPwm',      cfg.motorPwm);
+  setVal('cfg_moveInterval',  cfg.moveInterval);
+  setVal('cfg_sTemp1',        cfg.sTemp1);
+  setVal('cfg_sHum1',         cfg.sHum1);
+  setVal('cfg_sTemp2',        cfg.sTemp2);
+  setVal('cfg_sHum2',         cfg.sHum2);
+  setVal('cfg_settingPhase',  cfg.settingPhase);
+  setVal('cfg_hatchingPhase', cfg.hatchingPhase);
+  setVal('cfg_motorTimeOut',  cfg.motorTimeOut);
+  setVal('cfg_restartErr',    cfg.restartErr);
+  const safeEl = document.getElementById('cfg_safety');
+  if (safeEl) safeEl.value = cfg.safety ? '1' : '0';
+}
+
+function setVal(id, val) {
+  const el = document.getElementById(id);
+  if (el && val !== undefined && val !== null) el.value = val;
+}
+
+function renderLockState() {
+  const active = cfg.proc > 0;
+
+  document.getElementById('customLocked').classList.toggle('show', active);
+  document.getElementById('customForm').style.opacity      = active ? '0.35' : '1';
+  document.getElementById('customForm').style.pointerEvents= active ? 'none' : '';
+
+  document.getElementById('sysconfigLocked').classList.toggle('show', active);
+  document.getElementById('sysconfigForm').style.opacity      = active ? '0.35' : '1';
+  document.getElementById('sysconfigForm').style.pointerEvents= active ? 'none' : '';
+}
+
+// ─── START INCUBATION ─────────────────────────────────────────
+async function startInc(mode) {
+  // Custom mode: validate csettingPhase > 0 before even asking
+  
+  const label = mode === 1 ? 'Fresh' : 'Custom';
+  if (!confirm(`Start ${label} incubation? The device will restart to apply safety checks.`)) return;
+
+  try {
+    const res = await fetch('/api/startinc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(`${label} incubation starting — device restarting…`);
+      waitingForRestart = true;
+    } else {
+      showToast(data.error || 'Start failed', true);
+    }
+  } catch(e) {
+    // Demo mode
+    showToast(`${label} Could not reached the device`);
+  }
+}
+
+// ─── STOP INCUBATION ──────────────────────────────────────────
+async function stopInc() {
+  if (!confirm('Stop the active incubation? This will abort it, log the event, and restart the device.')) return;
+
+  try {
+    const res = await fetch('/api/stopinc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast('Incubation stopped — device restarting…');
+      waitingForRestart = true;
+    } else {
+      showToast(data.error || 'Stop failed', true);
+    }
+  } catch(e) {
+    showToast('Could not reach device', true);
+  }
+}
+
+// ─── SAVE CUSTOM ──────────────────────────────────────────────
+async function saveCustom() {
+  const sp = parseInt(document.getElementById('csettingPhase').value);
+  if (!sp || sp < 1) { showToast('Setting phase days must be > 0', true); return; }
+
+  const payload = {
+    csTemp1:        parseFloat(document.getElementById('csTemp1').value)        || 0,
+    csHum1:         parseInt(document.getElementById('csHum1').value)            || 0,
+    csTemp2:        parseFloat(document.getElementById('csTemp2').value)         || 0,
+    csHum2:         parseInt(document.getElementById('csHum2').value)            || 0,
+    csettingPhase:  sp,
+    chatchingPhase: parseInt(document.getElementById('chatchingPhase').value)    || 0
+  };
+  await postSettings(payload);
+}
+
+// ─── SAVE SYSCONFIG ───────────────────────────────────────────
+async function saveSysConfig() {
+  const payload = {
+    p:             parseFloat(document.getElementById('cfg_p').value)            || 0,
+    i:             parseFloat(document.getElementById('cfg_i').value)            || 0,
+    d:             parseFloat(document.getElementById('cfg_d').value)            || 0,
+    temWarn:       parseInt(document.getElementById('cfg_temWarn').value)        || 0,
+    humWarn:       parseInt(document.getElementById('cfg_humWarn').value)        || 0,
+    motorPwm:      parseInt(document.getElementById('cfg_motorPwm').value)       || 0,
+    moveInterval:  parseInt(document.getElementById('cfg_moveInterval').value)   || 0,
+    sTemp1:        parseFloat(document.getElementById('cfg_sTemp1').value)       || 0,
+    sHum1:         parseInt(document.getElementById('cfg_sHum1').value)          || 0,
+    sTemp2:        parseFloat(document.getElementById('cfg_sTemp2').value)       || 0,
+    sHum2:         parseInt(document.getElementById('cfg_sHum2').value)          || 0,
+    settingPhase:  parseInt(document.getElementById('cfg_settingPhase').value)   || 0,
+    hatchingPhase: parseInt(document.getElementById('cfg_hatchingPhase').value)  || 0,
+    safety:        document.getElementById('cfg_safety').value === '1',
+    motorTimeOut:  parseInt(document.getElementById('cfg_motorTimeOut').value) || 30,
+    restartErr:    parseFloat(document.getElementById('cfg_restartErr').value) || 0
+  };
+  await postSettings(payload);
+}
+
+async function postSettings(payload) {
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      // Merge into local cfg so UI reflects changes immediately
+      Object.assign(cfg, payload);
+      showToast('Saved to SD card ✓');
+      renderAll();
+    } else {
+      const d = await res.json().catch(() => ({}));
+      showToast(d.error || 'Save failed', true);
+    }
+  } catch(e) {
+    Object.assign(cfg, payload);
+    showToast('Saved (demo mode) ✓');
+    renderAll();
+  }
+}
+
+// ─── TIME SYNC ────────────────────────────────────────────────
+let pendingSync = null;
+
+function showTimeSyncModal() {
+  pendingSync = new Date();
+  const fmt = pendingSync.toLocaleString('en-IN', { hour12: false });
+  document.getElementById('syncPreview').textContent =
+    'Client device time: ' + fmt + '. This will be sent to the RTC module.';
+  document.getElementById('syncPopup').classList.add('show');
+}
+
+async function confirmSync() {
+  if (!pendingSync) return;
+  const d    = pendingSync;
+  const time = d.getHours() * 100 + d.getMinutes();
+  const date = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+
+  try {
+    const res = await fetch('/api/synctime', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ time, date })
+    });
+    if (res.ok) showToast('RTC time synced ✓');
+    else        showToast('Sync failed', true);
+  } catch {
+    showToast('Sync sent (demo) ✓');
+  }
+  cancelSync();
+}
+
+function cancelSync() {
+  closePopup('syncPopup');
+  pendingSync = null;
+}
+
+// ─── POPUP HELPERS ────────────────────────────────────────────
+function openContact() {
+  document.getElementById('contactPopup').classList.add('show');
+}
+
+function closePopup(id) {
+  document.getElementById(id).classList.remove('show');
+}
+
+// Close when clicking the dark overlay (not the box itself)
+function overlayClose(e, id) {
+  if (e.target === document.getElementById(id)) closePopup(id);
+}
+
+
+// ─── LOG FILES ────────────────────────────────────────────────
+async function loadLogs(manual = false) {
+  const icon   = document.getElementById('logsRefreshIcon');
+  const status = document.getElementById('logsStatus');
+  const cont   = document.getElementById('logsContainer');
+  if (manual) icon.classList.add('spinning');
+  status.textContent = 'Loading…';
+
+  try {
+    const res = await fetch('/api/logs', { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const files = await res.json();   // [ {name, size}, … ]
+
+    if (!files.length) {
+      cont.innerHTML = '<div class="log-empty">No log files found in /Logs</div>';
+      status.textContent = 'No files found';
+    } else {
+      cont.innerHTML = files.map(f => `
+        <div class="log-item">
+          <div>
+            <div class="log-name">${f.name}</div>
+            <div class="log-size">${formatBytes(f.size)}</div>
+          </div>
+          <a class="btn btn-outline btn-sm" href="/api/logs/download?file=${encodeURIComponent(f.name)}" download="${f.name}">
+            ↓ Download
+          </a>
+        </div>
+      `).join('');
+      status.textContent = files.length + ' file' + (files.length > 1 ? 's' : '') + ' found';
+    }
+  } catch(e) {
+    cont.innerHTML = '<div class="log-empty" style="color:var(--danger)">Could not load log list — SD card may be unavailable</div>';
+    status.textContent = 'Error loading logs';
+  }
+  if (manual) setTimeout(() => icon.classList.remove('spinning'), 400);
+}
+
+function formatBytes(b) {
+  if (b === undefined || b === null) return '';
+  if (b < 1024)       return b + ' B';
+  if (b < 1048576)    return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(2) + ' MB';
+}
+
+// ─── NAV ──────────────────────────────────────────────────────
+function showTab(name, btn) {
+  activeTab = name;
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  btn.classList.add('active');
+  if (name === 'logs') loadLogs();
+  if (name === 'custom' || name === 'sysconfig') renderForms();
+}
+
+// ─── TOAST ────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg, err = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.color = err ? 'var(--danger)' : 'var(--accent2)';
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}
+</script>
+
+<!-- CONTACT POPUP -->
+<div class="popup-overlay" id="contactPopup" onclick="overlayClose(event,'contactPopup')">
+  <div class="popup-box">
+    <button class="popup-close" onclick="closePopup('contactPopup')">&#x2715;</button>
+    <div class="popup-title">Contact Us</div>
+    <a class="contact-item" href="mailto:amarjitmoirangcha13@gmail.com">
+      <div class="contact-icon">@</div>
+      <div>
+        <div class="contact-label">Email</div>
+        <div class="contact-value"><span class="__cf_email__">amarjitmoirangcha13@gmail.com</span></div>
+      </div>
+    </a>
+    <a class="contact-item" href="https://www.instagram.com/amarjitt_meitei" target="_blank">
+      <div class="contact-icon">&#9633;</div>
+      <div>
+        <div class="contact-label">Instagram</div>
+        <div class="contact-value">amarjitt_meitei</div>
+      </div>
+    </a>
+  </div>
+</div>
+
+<!-- TIME SYNC POPUP -->
+<div class="popup-overlay" id="syncPopup" onclick="overlayClose(event,'syncPopup')">
+  <div class="popup-box">
+    <button class="popup-close" onclick="closePopup('syncPopup')">&#x2715;</button>
+    <div class="popup-title">Sync Device Time</div>
+    <p class="popup-body" id="syncPreview">Preparing…</p>
+    <div class="popup-actions">
+      <button class="btn btn-accent btn-sm" onclick="confirmSync()">Confirm & Sync</button>
+      <button
